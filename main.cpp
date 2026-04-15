@@ -110,32 +110,41 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
     if (event == EVENT_OBJECT_SHOW && idObject == OBJID_WINDOW && idChild == CHILDID_SELF) {
         wchar_t className[256];
         if (GetClassNameW(hwnd, className, 256) && wcscmp(className, L"CabinetWClass") == 0) {
-            Sleep(500);
+            // CRITICAL: Hide window IMMEDIATELY to prevent flicker
+            // Move it off-screen AND hide it
+            SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+
             IShellWindows* pShellWindows = NULL;
-            CoCreateInstance(CLSID_ShellWindows, NULL, CLSCTX_ALL, IID_IShellWindows, (void**)&pShellWindows);
-            if (!pShellWindows) return;
+            if (FAILED(
+                    CoCreateInstance(CLSID_ShellWindows, NULL, CLSCTX_ALL, IID_IShellWindows, (void**)&pShellWindows)))
+                return;
 
             IWebBrowser2* pNewWebBrowser = NULL;
-            long count = 0;
-            pShellWindows->get_Count(&count);
-            for (long i = 0; i < count; ++i) {
-                VARIANT vIdx;
-                vIdx.vt = VT_I4;
-                vIdx.lVal = i;
-                IDispatch* pDisp = NULL;
-                if (SUCCEEDED(pShellWindows->Item(vIdx, &pDisp)) && pDisp) {
-                    IWebBrowser2* pWB = NULL;
-                    if (SUCCEEDED(pDisp->QueryInterface(IID_IWebBrowser2, (void**)&pWB))) {
-                        SHANDLE_PTR hPtr = 0;
-                        if (SUCCEEDED(pWB->get_HWND(&hPtr)) && (HWND)hPtr == hwnd) {
-                            pNewWebBrowser = pWB;
-                            pDisp->Release();
-                            break;
+            // Wait for COM registration without blocking the whole system, but very short
+            for (int r = 0; r < 10; ++r) {
+                long count = 0;
+                pShellWindows->get_Count(&count);
+                for (long i = 0; i < count; ++i) {
+                    VARIANT vIdx;
+                    vIdx.vt = VT_I4;
+                    vIdx.lVal = i;
+                    IDispatch* pDisp = NULL;
+                    if (SUCCEEDED(pShellWindows->Item(vIdx, &pDisp)) && pDisp) {
+                        IWebBrowser2* pWB = NULL;
+                        if (SUCCEEDED(pDisp->QueryInterface(IID_IWebBrowser2, (void**)&pWB))) {
+                            SHANDLE_PTR hPtr = 0;
+                            if (SUCCEEDED(pWB->get_HWND(&hPtr)) && (HWND)hPtr == hwnd) {
+                                pNewWebBrowser = pWB;
+                                pDisp->Release();
+                                break;
+                            }
+                            pWB->Release();
                         }
-                        pWB->Release();
+                        pDisp->Release();
                     }
-                    pDisp->Release();
                 }
+                if (pNewWebBrowser) break;
+                Sleep(50);
             }
 
             if (!pNewWebBrowser) {
@@ -151,67 +160,72 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                 return;
             }
 
-            HWND existingMainHwnd = NULL;
-            HWND existingTabHwnd = NULL;
-            for (long i = 0; i < count; ++i) {
-                VARIANT vIdx;
-                vIdx.vt = VT_I4;
-                vIdx.lVal = i;
-                IDispatch* pDisp = NULL;
-                if (SUCCEEDED(pShellWindows->Item(vIdx, &pDisp)) && pDisp) {
-                    IWebBrowser2* pWB = NULL;
-                    if (SUCCEEDED(pDisp->QueryInterface(IID_IWebBrowser2, (void**)&pWB))) {
-                        SHANDLE_PTR hPtr = 0;
-                        if (SUCCEEDED(pWB->get_HWND(&hPtr)) && (HWND)hPtr != hwnd) {
-                            if (GetComparisonPath(GetRawBrowserUrl(pWB)) == normalizedUrl) {
-                                existingMainHwnd = (HWND)hPtr;
-                                existingTabHwnd = GetTabHandle(pWB);
-                                pWB->Release();
-                                pDisp->Release();
-                                break;
-                            }
-                        }
-                        pWB->Release();
-                    }
-                    pDisp->Release();
+            // Check if we should merge it
+            HWND mainHwnd = NULL;
+            HWND tempHwnd = FindWindowExW(NULL, NULL, L"CabinetWClass", NULL);
+            while (tempHwnd) {
+                if (tempHwnd != hwnd && IsWindowVisible(tempHwnd)) {
+                    mainHwnd = tempHwnd;
+                    break;
                 }
+                tempHwnd = FindWindowExW(NULL, tempHwnd, L"CabinetWClass", NULL);
             }
 
-            if (existingMainHwnd && existingTabHwnd) {
-                Wh_log("[Log] Found duplicate. Switching tab...\n");
-                std::vector<HWND> tabList;
-                HWND hTab = FindWindowExW(existingMainHwnd, NULL, L"ShellTabWindowClass", NULL);
-                while (hTab) {
-                    tabList.push_back(hTab);
-                    hTab = FindWindowExW(existingMainHwnd, hTab, L"ShellTabWindowClass", NULL);
-                }
-                auto it = std::find(tabList.begin(), tabList.end(), existingTabHwnd);
-                if (it != tabList.end()) {
-                    int idx = (int)std::distance(tabList.begin(), it);
-                    SendMessageW(existingMainHwnd, WM_COMMAND, CMD_SELECT_TAB_BASE + idx + 1, 0);
-                }
-                SetForegroundWindow(existingMainHwnd);
-                pNewWebBrowser->Quit();
-            } else {
-                HWND mainHwnd = NULL;
-                HWND tempHwnd = FindWindowExW(NULL, NULL, L"CabinetWClass", NULL);
-                while (tempHwnd) {
-                    if (tempHwnd != hwnd && IsWindowVisible(tempHwnd)) {
-                        mainHwnd = tempHwnd;
-                        break;
+            if (mainHwnd) {
+                // Check if path already exists in any window
+                HWND existingTabHwnd = NULL;
+                HWND existingMainHwnd = NULL;
+                long count = 0;
+                pShellWindows->get_Count(&count);
+                for (long i = 0; i < count; ++i) {
+                    VARIANT vIdx;
+                    vIdx.vt = VT_I4;
+                    vIdx.lVal = i;
+                    IDispatch* pDisp = NULL;
+                    if (SUCCEEDED(pShellWindows->Item(vIdx, &pDisp)) && pDisp) {
+                        IWebBrowser2* pWB = NULL;
+                        if (SUCCEEDED(pDisp->QueryInterface(IID_IWebBrowser2, (void**)&pWB))) {
+                            SHANDLE_PTR hPtr = 0;
+                            if (SUCCEEDED(pWB->get_HWND(&hPtr)) && (HWND)hPtr != hwnd) {
+                                if (GetComparisonPath(GetRawBrowserUrl(pWB)) == normalizedUrl) {
+                                    existingMainHwnd = (HWND)hPtr;
+                                    existingTabHwnd = GetTabHandle(pWB);
+                                    pWB->Release();
+                                    pDisp->Release();
+                                    break;
+                                }
+                            }
+                            pWB->Release();
+                        }
+                        pDisp->Release();
                     }
-                    tempHwnd = FindWindowExW(NULL, tempHwnd, L"CabinetWClass", NULL);
                 }
 
-                if (mainHwnd) {
-                    Wh_log("[Log] No duplicate found. Moving to existing window...\n");
+                if (existingMainHwnd && existingTabHwnd) {
+                    // Just switch
+                    std::vector<HWND> tabList;
+                    HWND hTab = FindWindowExW(existingMainHwnd, NULL, L"ShellTabWindowClass", NULL);
+                    while (hTab) {
+                        tabList.push_back(hTab);
+                        hTab = FindWindowExW(existingMainHwnd, hTab, L"ShellTabWindowClass", NULL);
+                    }
+                    auto it = std::find(tabList.begin(), tabList.end(), existingTabHwnd);
+                    if (it != tabList.end()) {
+                        int idx = (int)std::distance(tabList.begin(), it);
+                        SendMessageW(existingMainHwnd, WM_COMMAND, CMD_SELECT_TAB_BASE + idx + 1, 0);
+                    }
+                    SetForegroundWindow(existingMainHwnd);
+                    pNewWebBrowser->Quit();
+                } else {
+                    // Convert to tab
                     std::set<HWND> oldTabs = GetWindowTabHandles(mainHwnd);
 
                     PostMessageW(mainHwnd, WM_COMMAND, CMD_NEW_TAB, 0);
+                    pNewWebBrowser->Quit();  // Standalone window is hidden anyway, so Quitting is seamless
 
                     HWND newTabHwnd = NULL;
                     for (int r = 0; r < 30; ++r) {
-                        Sleep(100);
+                        Sleep(50);
                         std::set<HWND> currentTabs = GetWindowTabHandles(mainHwnd);
                         for (HWND h : currentTabs) {
                             if (oldTabs.find(h) == oldTabs.end()) {
@@ -223,14 +237,8 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                     }
 
                     if (newTabHwnd) {
-                        Wh_log("[Log] New tab created. Navigating...\n");
-
-                        // Close standalone window
-                        pNewWebBrowser->Quit();
-
                         bool navigated = false;
-                        for (int retry = 0; retry < 15; ++retry) {
-                            Sleep(200);
+                        for (int retry = 0; retry < 10; ++retry) {
                             pShellWindows->get_Count(&count);
                             for (long i = 0; i < count; ++i) {
                                 VARIANT vIdx;
@@ -241,9 +249,8 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                                     IWebBrowser2* pWB = NULL;
                                     if (SUCCEEDED(pDisp->QueryInterface(IID_IWebBrowser2, (void**)&pWB))) {
                                         if (GetTabHandle(pWB) == newTabHwnd) {
-                                            Wh_log("[Log] Found new tab's WebBrowser. Navigating...\n");
-                                            HRESULT hr = NavigateToPath(pWB, normalizedUrl);
-                                            if (SUCCEEDED(hr)) navigated = true;
+                                            NavigateToPath(pWB, normalizedUrl);
+                                            navigated = true;
                                             pWB->Release();
                                             pDisp->Release();
                                             break;
@@ -254,10 +261,14 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                                 }
                             }
                             if (navigated) break;
+                            Sleep(100);
                         }
                     }
                     SetForegroundWindow(mainHwnd);
                 }
+            } else {
+                // No existing window, so we must show THIS window
+                SetWindowPos(hwnd, NULL, 100, 100, 1000, 700, SWP_SHOWWINDOW);
             }
             pNewWebBrowser->Release();
             pShellWindows->Release();
