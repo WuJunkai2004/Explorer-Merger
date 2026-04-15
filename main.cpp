@@ -73,12 +73,9 @@ std::set<HWND> GetWindowTabHandles(HWND mainWindow) {
     return tabs;
 }
 
-// Advanced Navigation using IShellBrowser::BrowseObject
 HRESULT NavigateToPath(IWebBrowser2* pWB, const std::wstring& path) {
     HRESULT hrFinal = E_FAIL;
     IServiceProvider* pServiceProvider = NULL;
-
-    // 1. Try IShellBrowser::BrowseObject (Lower level, more reliable)
     if (SUCCEEDED(pWB->QueryInterface(IID_IServiceProvider, (void**)&pServiceProvider))) {
         IShellBrowser* pShellBrowser = NULL;
         if (SUCCEEDED(pServiceProvider->QueryService(SID_SShellBrowser, IID_IShellBrowser, (void**)&pShellBrowser))) {
@@ -91,8 +88,6 @@ HRESULT NavigateToPath(IWebBrowser2* pWB, const std::wstring& path) {
         }
         pServiceProvider->Release();
     }
-
-    // 2. Fallback to Navigate2 if BrowseObject didn't work or wasn't available
     if (FAILED(hrFinal)) {
         Wh_log("[Log] BrowseObject failed, falling back to Navigate2...\n");
         VARIANT vUrl;
@@ -101,27 +96,51 @@ HRESULT NavigateToPath(IWebBrowser2* pWB, const std::wstring& path) {
         hrFinal = pWB->Navigate2(&vUrl, NULL, NULL, NULL, NULL);
         VariantClear(&vUrl);
     }
-
     return hrFinal;
 }
+
+std::set<HWND> g_allowedHwnds;
 
 void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild,
                            DWORD dwEventThread, DWORD dwmsEventTime) {
     if (event == EVENT_OBJECT_SHOW && idObject == OBJID_WINDOW && idChild == CHILDID_SELF) {
+        if (g_allowedHwnds.count(hwnd)) {
+            g_allowedHwnds.erase(hwnd);
+            return;
+        }
+
         wchar_t className[256];
         if (GetClassNameW(hwnd, className, 256) && wcscmp(className, L"CabinetWClass") == 0) {
-            // CRITICAL: Hide window IMMEDIATELY to prevent flicker
-            // Move it off-screen AND hide it
+            // 1. CRITICAL: Hide window IMMEDIATELY
             SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
 
+            // 2. Decide if we should keep it or merge it
+            HWND mainHwnd = NULL;
+            HWND tempHwnd = FindWindowExW(NULL, NULL, L"CabinetWClass", NULL);
+            while (tempHwnd) {
+                if (tempHwnd != hwnd && IsWindowVisible(tempHwnd)) {
+                    mainHwnd = tempHwnd;
+                    break;
+                }
+                tempHwnd = FindWindowExW(NULL, tempHwnd, L"CabinetWClass", NULL);
+            }
+
+            if (!mainHwnd) {
+                // First window, show it properly
+                g_allowedHwnds.insert(hwnd);
+                SetWindowPos(hwnd, NULL, 100, 100, 1000, 700, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+                SetForegroundWindow(hwnd);
+                return;
+            }
+
+            // 3. Merging logic
             IShellWindows* pShellWindows = NULL;
             if (FAILED(
                     CoCreateInstance(CLSID_ShellWindows, NULL, CLSCTX_ALL, IID_IShellWindows, (void**)&pShellWindows)))
                 return;
 
             IWebBrowser2* pNewWebBrowser = NULL;
-            // Wait for COM registration without blocking the whole system, but very short
-            for (int r = 0; r < 10; ++r) {
+            for (int r = 0; r < 20; ++r) {
                 long count = 0;
                 pShellWindows->get_Count(&count);
                 for (long i = 0; i < count; ++i) {
@@ -144,37 +163,14 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                     }
                 }
                 if (pNewWebBrowser) break;
-                Sleep(50);
+                Sleep(20);  // Very short poll
             }
 
-            if (!pNewWebBrowser) {
-                pShellWindows->Release();
-                return;
-            }
+            if (pNewWebBrowser) {
+                std::wstring normalizedUrl = GetComparisonPath(GetRawBrowserUrl(pNewWebBrowser));
 
-            std::wstring rawUrl = GetRawBrowserUrl(pNewWebBrowser);
-            std::wstring normalizedUrl = GetComparisonPath(rawUrl);
-            if (normalizedUrl.empty()) {
-                pNewWebBrowser->Release();
-                pShellWindows->Release();
-                return;
-            }
-
-            // Check if we should merge it
-            HWND mainHwnd = NULL;
-            HWND tempHwnd = FindWindowExW(NULL, NULL, L"CabinetWClass", NULL);
-            while (tempHwnd) {
-                if (tempHwnd != hwnd && IsWindowVisible(tempHwnd)) {
-                    mainHwnd = tempHwnd;
-                    break;
-                }
-                tempHwnd = FindWindowExW(NULL, tempHwnd, L"CabinetWClass", NULL);
-            }
-
-            if (mainHwnd) {
-                // Check if path already exists in any window
-                HWND existingTabHwnd = NULL;
                 HWND existingMainHwnd = NULL;
+                HWND existingTabHwnd = NULL;
                 long count = 0;
                 pShellWindows->get_Count(&count);
                 for (long i = 0; i < count; ++i) {
@@ -221,7 +217,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                     std::set<HWND> oldTabs = GetWindowTabHandles(mainHwnd);
 
                     PostMessageW(mainHwnd, WM_COMMAND, CMD_NEW_TAB, 0);
-                    pNewWebBrowser->Quit();  // Standalone window is hidden anyway, so Quitting is seamless
+                    pNewWebBrowser->Quit();
 
                     HWND newTabHwnd = NULL;
                     for (int r = 0; r < 30; ++r) {
@@ -238,7 +234,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
 
                     if (newTabHwnd) {
                         bool navigated = false;
-                        for (int retry = 0; retry < 10; ++retry) {
+                        for (int retry = 0; retry < 15; ++retry) {
                             pShellWindows->get_Count(&count);
                             for (long i = 0; i < count; ++i) {
                                 VARIANT vIdx;
@@ -266,11 +262,8 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                     }
                     SetForegroundWindow(mainHwnd);
                 }
-            } else {
-                // No existing window, so we must show THIS window
-                SetWindowPos(hwnd, NULL, 100, 100, 1000, 700, SWP_SHOWWINDOW);
+                pNewWebBrowser->Release();
             }
-            pNewWebBrowser->Release();
             pShellWindows->Release();
         }
     }
