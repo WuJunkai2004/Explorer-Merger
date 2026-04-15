@@ -66,7 +66,7 @@ def main():
         generate_footer(),
     ]
 
-    (dist / f"{info['id']}.cpp").write_text("\n".join(target))
+    (dist / f"{info['id']}.wh.cpp").write_text("\n".join(target))
 
 
 if __name__ == "__main__":

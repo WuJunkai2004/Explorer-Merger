@@ -38,7 +38,7 @@ You must have Python 3 installed and added to your system PATH to use the build 
 
 ### 1. Building as a Windhawk Mod
 
-To assemble the final Windhawk mod (`dist/Explorer-Merger.cpp`):
+To assemble the final Windhawk mod (`dist/explorer-merger.wh.cpp`):
 
 ```powershell
 make mod
