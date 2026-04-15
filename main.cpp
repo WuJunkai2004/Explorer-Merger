@@ -1,5 +1,6 @@
 #include <exdisp.h>
 #include <shldisp.h>
+#include <shlguid.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <windows.h>
@@ -100,6 +101,70 @@ HRESULT NavigateToPath(IWebBrowser2* pWB, const std::wstring& path) {
 }
 
 std::set<HWND> g_allowedHwnds;
+IShellWindows* g_pShellWindows = NULL;
+#define WM_CHECK_WINDOWS (WM_USER + 1)
+
+void HideWindowFast(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+    if (!(exStyle & WS_EX_LAYERED)) SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
+    SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+    SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+}
+
+class CShellWindowsSink : public IDispatch {
+public:
+    STDMETHODIMP QueryInterface(REFIID riid, void** ppv) {
+        if (riid == IID_IUnknown || riid == IID_IDispatch || riid == __uuidof(DShellWindowsEvents)) {
+            *ppv = static_cast<IDispatch*>(this);
+            return S_OK;
+        }
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+    STDMETHODIMP_(ULONG) AddRef() { return 2; }
+    STDMETHODIMP_(ULONG) Release() { return 1; }
+    STDMETHODIMP GetTypeInfoCount(UINT*) { return E_NOTIMPL; }
+    STDMETHODIMP GetTypeInfo(UINT, LCID, ITypeInfo**) { return E_NOTIMPL; }
+    STDMETHODIMP GetIDsOfNames(REFIID, LPOLESTR*, UINT, LCID, DISPID*) { return E_NOTIMPL; }
+    STDMETHODIMP Invoke(DISPID dispIdMember, REFIID, LCID, WORD, DISPPARAMS*, VARIANT*, EXCEPINFO*, UINT*) {
+        if (dispIdMember == 200) PostMessage(NULL, WM_CHECK_WINDOWS, 0, 0);
+        return S_OK;
+    }
+};
+
+void CheckNewShellWindows() {
+    if (!g_pShellWindows) return;
+    long count = 0;
+    g_pShellWindows->get_Count(&count);
+    for (long i = 0; i < count; ++i) {
+        VARIANT vIdx;
+        vIdx.vt = VT_I4;
+        vIdx.lVal = i;
+        IDispatch* pDisp = NULL;
+        if (SUCCEEDED(g_pShellWindows->Item(vIdx, &pDisp)) && pDisp) {
+            IWebBrowser2* pWB = NULL;
+            if (SUCCEEDED(pDisp->QueryInterface(IID_IWebBrowser2, (void**)&pWB))) {
+                SHANDLE_PTR hPtr = 0;
+                if (SUCCEEDED(pWB->get_HWND(&hPtr)) && hPtr) {
+                    HWND hwnd = (HWND)hPtr;
+                    HWND mainHwnd = NULL;
+                    HWND tempHwnd = FindWindowExW(NULL, NULL, L"CabinetWClass", NULL);
+                    while (tempHwnd) {
+                        if (tempHwnd != hwnd && IsWindowVisible(tempHwnd)) {
+                            mainHwnd = tempHwnd;
+                            break;
+                        }
+                        tempHwnd = FindWindowExW(NULL, tempHwnd, L"CabinetWClass", NULL);
+                    }
+                    if (mainHwnd && !g_allowedHwnds.count(hwnd)) HideWindowFast(hwnd);
+                }
+                pWB->Release();
+            }
+            pDisp->Release();
+        }
+    }
+}
 
 void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild,
                            DWORD dwEventThread, DWORD dwmsEventTime) {
@@ -122,23 +187,13 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                 tempHwnd = FindWindowExW(NULL, tempHwnd, L"CabinetWClass", NULL);
             }
 
-            if (!mainHwnd) {
-                // First window, let it show naturally (no flickering, preserves native position)
-                return;
-            }
-
-            // 2. Subsequent window: Hide IMMEDIATELY before merging
-            // Use transparency + off-screen positioning for maximum smoothness
-            LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
-            SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
-            SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+            if (!mainHwnd) return;
+            HideWindowFast(hwnd);
 
             // 3. Merging logic
-            IShellWindows* pShellWindows = NULL;
-            if (FAILED(
-                    CoCreateInstance(CLSID_ShellWindows, NULL, CLSCTX_ALL, IID_IShellWindows, (void**)&pShellWindows)))
-                return;
+            if (!g_pShellWindows) return;
+            IShellWindows* pShellWindows = g_pShellWindows;
+            pShellWindows->AddRef();
 
             IWebBrowser2* pNewWebBrowser = NULL;
             for (int r = 0; r < 20; ++r) {
@@ -270,13 +325,36 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
 int main() {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     Wh_log("[Log] Explorer Merger start...\n");
+
+    IConnectionPoint* pCP = NULL;
+    DWORD dwCookie = 0;
+    if (SUCCEEDED(
+            CoCreateInstance(CLSID_ShellWindows, NULL, CLSCTX_ALL, IID_IShellWindows, (void**)&g_pShellWindows))) {
+        IConnectionPointContainer* pCPC = NULL;
+        if (SUCCEEDED(g_pShellWindows->QueryInterface(IID_IConnectionPointContainer, (void**)&pCPC))) {
+            pCPC->FindConnectionPoint(__uuidof(DShellWindowsEvents), &pCP);
+            if (pCP) pCP->Advise(new CShellWindowsSink(), &dwCookie);
+            pCPC->Release();
+        }
+    }
+
     HWINEVENTHOOK hHook =
         SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, NULL, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT);
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
+        if (msg.message == WM_CHECK_WINDOWS) {
+            CheckNewShellWindows();
+            continue;
+        }
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
+    if (pCP) {
+        pCP->Unadvise(dwCookie);
+        pCP->Release();
+    }
+    if (g_pShellWindows) g_pShellWindows->Release();
     UnhookWinEvent(hHook);
     CoUninitialize();
     return 0;
