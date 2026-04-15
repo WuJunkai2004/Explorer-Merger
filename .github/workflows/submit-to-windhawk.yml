@@ -1,7 +1,16 @@
 name: Submit to Windhawk
 
 on:
-  workflow_dispatch
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: "Branch name for the PR"
+        required: true
+        default: "add-explorer-merger-mod"
+      commit_message:
+        description: "Commit message"
+        required: true
+        default: "feat: add explorer-merger mod"
 
 jobs:
   submit:
@@ -43,10 +52,10 @@ jobs:
           git checkout -b ${{ github.event.inputs.branch_name }}
 
           echo "从 dist 目录复制生成的 Mod 文件..."
-          cp "../dist/${{ env.MOD_ID }}.cpp" mods/
+          cp "../dist/${{ env.MOD_ID }}.wh.cpp" mods/
 
           echo "提交变更..."
-          git add "mods/${{ env.MOD_ID }}.cpp"
+          git add "mods/${{ env.MOD_ID }}.wh.cpp"
           git commit -m "${{ github.event.inputs.commit_message }}"
 
           echo "推送到远程 Fork 仓库..."
