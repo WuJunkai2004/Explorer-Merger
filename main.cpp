@@ -111,10 +111,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
 
         wchar_t className[256];
         if (GetClassNameW(hwnd, className, 256) && wcscmp(className, L"CabinetWClass") == 0) {
-            // 1. CRITICAL: Hide window IMMEDIATELY
-            SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
-
-            // 2. Decide if we should keep it or merge it
+            // 1. Decide if we should keep it or merge it
             HWND mainHwnd = NULL;
             HWND tempHwnd = FindWindowExW(NULL, NULL, L"CabinetWClass", NULL);
             while (tempHwnd) {
@@ -126,12 +123,16 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
             }
 
             if (!mainHwnd) {
-                // First window, show it properly
-                g_allowedHwnds.insert(hwnd);
-                SetWindowPos(hwnd, NULL, 100, 100, 1000, 700, SWP_SHOWWINDOW | SWP_NOACTIVATE);
-                SetForegroundWindow(hwnd);
+                // First window, let it show naturally (no flickering, preserves native position)
                 return;
             }
+
+            // 2. Subsequent window: Hide IMMEDIATELY before merging
+            // Use transparency + off-screen positioning for maximum smoothness
+            LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
+            SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
+            SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
 
             // 3. Merging logic
             IShellWindows* pShellWindows = NULL;
@@ -198,7 +199,6 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                 }
 
                 if (existingMainHwnd && existingTabHwnd) {
-                    // Just switch
                     std::vector<HWND> tabList;
                     HWND hTab = FindWindowExW(existingMainHwnd, NULL, L"ShellTabWindowClass", NULL);
                     while (hTab) {
@@ -213,9 +213,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                     SetForegroundWindow(existingMainHwnd);
                     pNewWebBrowser->Quit();
                 } else {
-                    // Convert to tab
                     std::set<HWND> oldTabs = GetWindowTabHandles(mainHwnd);
-
                     PostMessageW(mainHwnd, WM_COMMAND, CMD_NEW_TAB, 0);
                     pNewWebBrowser->Quit();
 
