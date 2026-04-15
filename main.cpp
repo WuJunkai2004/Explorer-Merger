@@ -98,6 +98,21 @@ HRESULT NavigateToPath(IWebBrowser2* pWB, const std::wstring& path) {
     return hrFinal;
 }
 
+void BypassWinForegroundRestrictions() {
+    keybd_event(0x86, 0, 0, 0); // VK_F23
+    keybd_event(0x86, 0, KEYEVENTF_KEYUP, 0);
+}
+
+void RestoreWindowToForeground(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+    BypassWinForegroundRestrictions();
+    if (!SetForegroundWindow(hwnd)) {
+        Sleep(50);
+        SetForegroundWindow(hwnd);
+    }
+}
+
 std::set<HWND> g_allowedHwnds;
 IShellWindows* g_pShellWindows = NULL;
 #define WM_CHECK_WINDOWS (WM_USER + 1)
@@ -263,7 +278,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                         int idx = (int)std::distance(tabList.begin(), it);
                         SendMessageW(existingMainHwnd, WM_COMMAND, CMD_SELECT_TAB_BASE + idx + 1, 0);
                     }
-                    SetForegroundWindow(existingMainHwnd);
+                    RestoreWindowToForeground(existingMainHwnd);
                     pNewWebBrowser->Quit();
                 } else {
                     std::set<HWND> oldTabs = GetWindowTabHandles(mainHwnd);
@@ -311,7 +326,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
                             Sleep(100);
                         }
                     }
-                    SetForegroundWindow(mainHwnd);
+                    RestoreWindowToForeground(mainHwnd);
                 }
                 pNewWebBrowser->Release();
             }
