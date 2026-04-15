@@ -1,4 +1,4 @@
-# Explorer-Merger
+# [Explorer-Merger](https://github.com/WuJunkai2004/Explorer-Merger)
 
 **Explorer-Merger** is a Windows utility designed to automatically merge newly opened File Explorer windows into tabs of an existing Explorer window. This project aims to reduce window clutter and provide a more organized file management experience on Windows 11.
 

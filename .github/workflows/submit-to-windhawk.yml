@@ -1,0 +1,73 @@
+name: Submit to Windhawk
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Branch name for the PR'
+        required: true
+        default: 'add-explorer-merger-mod'
+      pr_title:
+        description: 'Title of the Pull Request'
+        required: true
+        default: 'Add Explorer-Merger mod'
+      pr_body:
+        description: 'Description of the Pull Request'
+        required: true
+        default: |
+          Add Explorer-Merger mod.
+
+          ### Technical Highlights:
+          - **Event-Driven Architecture**: Transitioned from traditional polling to a more efficient event-driven model.
+          - **UI Improvements**: Implemented declarative UI rendering for better maintainability and performance.
+          - **Robust Tab Management**: Seamlessly converts new Explorer windows into tabs, improving workspace organization.
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Build Mod
+        run: make
+
+      - name: Fork, Commit and PR
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+        run: |
+          # 配置 Git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "正在处理 Fork 与 Clone (由 GitHub CLI 自动完成)..."
+          # 这条命令会：1. 在你账号下 Fork 2. Clone 到本地 3. 自动配置 remote
+          gh repo fork ramensoftware/windhawk-mods --clone --remote
+          
+          cd windhawk-mods
+          
+          echo "创建并切换分支: ${{ github.event.inputs.branch_name }}"
+          git checkout -b ${{ github.event.inputs.branch_name }}
+          
+          echo "同步 Mod 文件到官方目录结构..."
+          cp "../dist/${{ env.MOD_ID }}.cpp" mods/
+          
+          echo "提交变更..."
+          git add "mods/${{ env.MOD_ID }}.cpp"
+          git commit -m "${{ github.event.inputs.commit_message }}"
+          
+          echo "推送到你的远程 Fork 仓库..."
+          git push origin ${{ github.event.inputs.branch_name }} --force
+          
+          echo "向官方发起 Pull Request..."
+          gh pr create \
+            --repo ramensoftware/windhawk-mods \
+            --title "${{ github.event.inputs.pr_title }}" \
+            --body "${{ github.event.inputs.pr_body }}" \
+            --head "${{ github.repository_owner }}:${{ github.event.inputs.branch_name }}" \
+            --base main

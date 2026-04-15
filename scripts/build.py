@@ -57,15 +57,16 @@ def generate_footer() -> str:
 
 
 def main():
+    info = load_toml(root / "project.toml")
     target = [
-        generate_manifest(load_toml(root / "project.toml")),
+        generate_manifest(info),
         generate_readme(root / "README.md"),
         generate_header(),
         generate_source(),
         generate_footer(),
     ]
 
-    (dist / "Explorer-Merger.cpp").write_text("\n".join(target))
+    (dist / f"{info['id']}.cpp").write_text("\n".join(target))
 
 
 if __name__ == "__main__":
