@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       branch_name:
-        description: 'Branch name for the PR'
+        description: "Branch name for the PR"
         required: true
-        default: 'add-explorer-merger-mod'
+        default: "add-explorer-merger-mod"
       pr_title:
-        description: 'Title of the Pull Request'
+        description: "Title of the Pull Request"
         required: true
-        default: 'Add Explorer-Merger mod'
+        default: "Add Explorer-Merger mod"
       pr_body:
-        description: 'Description of the Pull Request'
+        description: "Description of the Pull Request"
         required: true
         default: |
           Add Explorer-Merger mod.
@@ -22,9 +22,9 @@ on:
           - **UI Improvements**: Implemented declarative UI rendering for better maintainability and performance.
           - **Robust Tab Management**: Seamlessly converts new Explorer windows into tabs, improving workspace organization.
       commit_message:
-        description: 'Commit message'
+        description: "Commit message"
         required: true
-        default: 'feat: add explorer-merger mod'
+        default: "feat: add explorer-merger mod"
 
 jobs:
   submit:
@@ -36,7 +36,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       - name: Build Mod
         run: make
@@ -54,26 +54,27 @@ jobs:
           # 配置 Git
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          gh auth setup-git
 
           echo "正在处理 Fork 与 Clone (由 GitHub CLI 自动完成)..."
           # 这条命令会：1. 在你账号下 Fork 2. Clone 到本地 3. 自动配置 remote
           gh repo fork ramensoftware/windhawk-mods --clone
-          
+
           cd windhawk-mods
-          
+
           echo "创建并切换分支: ${{ github.event.inputs.branch_name }}"
           git checkout -b ${{ github.event.inputs.branch_name }}
-          
+
           echo "从 dist 目录复制生成的 Mod 文件..."
           cp "../dist/${{ env.MOD_ID }}.cpp" mods/
-          
+
           echo "提交变更..."
           git add "mods/${{ env.MOD_ID }}.cpp"
           git commit -m "${{ github.event.inputs.commit_message }}"
-          
+
           echo "推送到远程 Fork 仓库..."
           git push origin ${{ github.event.inputs.branch_name }} --force
-          
+
           echo "向官方发起 Pull Request..."
           gh pr create \
             --repo ramensoftware/windhawk-mods \
