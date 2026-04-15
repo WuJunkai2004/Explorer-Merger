@@ -10,7 +10,9 @@
 #include <vector>
 
 #ifndef WH_MOD
+#ifndef Wh_log
 #define Wh_log printf
+#endif
 #endif
 
 #pragma comment(lib, "user32.lib")
