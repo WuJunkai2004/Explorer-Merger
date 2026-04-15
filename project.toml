@@ -1,0 +1,8 @@
+id="Explorer-Merger"
+name="Explorer-Merger"
+description="A tool to converts new Explorer windows into tabs."
+version="1.0.0"
+authors="Wu Junkai"
+license="MIT"
+include="explorer.exe"
+compilerOptions="-lole32 -loleaut32 -lshell32 -luser32 -luuid"

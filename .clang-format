@@ -1,0 +1,10 @@
+---
+BasedOnStyle: Google
+IndentWidth: 4
+ColumnLimit: 120
+AccessModifierOffset: -4
+# 以下是一些基于 Google 风格但常根据 IndentWidth 同步调整的细节
+ContinuationIndentWidth: 4
+DerivePointerAlignment: false
+PointerAlignment: Left
+...
