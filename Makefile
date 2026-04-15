@@ -4,4 +4,9 @@ all:
 debug:
 	python scripts/compile.py
 
-.PHONY: all debug
+clean:
+	rm -rf dist
+	rm *.obj
+	rm *.pdb
+
+.PHONY: all debug clean
