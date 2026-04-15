@@ -10,10 +10,8 @@
 #include <string>
 #include <vector>
 
-#ifndef WH_MOD
-#ifndef Wh_Log
+#if !defined(WH_MOD) && !defined(Wh_Log)
 #define Wh_Log printf
-#endif
 #endif
 
 #pragma comment(lib, "user32.lib")
