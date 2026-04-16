@@ -29,19 +29,24 @@ def generate_manifest(info: dict) -> str:
     return "\n".join(manifest)
 
 
-def generate_readme(path: Path) -> str:
-    with path.open() as f:
-        return f"""// ==WindhawkModReadme==
-/*
-{f.read()}
-
-*/
-// ==/WindhawkModReadme=="""
-
-
 def read_file(path: Path) -> str:
     with path.open() as f:
         return f.read()
+
+
+def generate_readme() -> str:
+    readme = read_file(root / "README.md").split("\n")
+    introduction = []
+    for line in readme:
+        if line.startswith("##"):
+            break
+        introduction.append(line)
+    endl = "\n"
+    return f"""// ==WindhawkModDescription==
+/*
+{endl.join(introduction).strip()}
+*/
+// ==/WindhawkModReadme=="""
 
 
 def generate_header() -> str:
@@ -60,7 +65,7 @@ def main():
     info = load_toml(root / "project.toml")
     target = [
         generate_manifest(info),
-        generate_readme(root / "README.md"),
+        generate_readme(),
         generate_header(),
         generate_source(),
         generate_footer(),

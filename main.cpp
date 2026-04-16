@@ -10,8 +10,8 @@
 #include <string>
 #include <vector>
 
-#if !defined(WH_MOD) && !defined(Wh_Log)
-#define Wh_Log printf
+#if !defined(WH_MOD_ID) && !defined(Wh_Log)
+#define Wh_Log wprintf
 #endif
 
 #pragma comment(lib, "user32.lib")
@@ -88,7 +88,7 @@ HRESULT NavigateToPath(IWebBrowser2* pWB, const std::wstring& path) {
         pServiceProvider->Release();
     }
     if (FAILED(hrFinal)) {
-        Wh_Log("[Log] BrowseObject failed, falling back to Navigate2...\n");
+        Wh_Log(L"[Log] BrowseObject failed, falling back to Navigate2...\n");
         VARIANT vUrl;
         vUrl.vt = VT_BSTR;
         vUrl.bstrVal = SysAllocString(path.c_str());
@@ -337,7 +337,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
 
 int main() {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-    Wh_Log("[Log] Explorer Merger start...\n");
+    Wh_Log(L"[Log] Explorer Merger start...\n");
 
     IConnectionPoint* pCP = NULL;
     DWORD dwCookie = 0;
