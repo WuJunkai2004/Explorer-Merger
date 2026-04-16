@@ -1,10 +1,8 @@
 // --- CALLBACKS ---
-void MainThread() {
-    main();
-}
+void MainThread() { main(); }
 
-#include <thread>
 #include <cstdio>
+#include <thread>
 
 std::thread* g_pTabThread = nullptr;
 bool g_Running = true;
@@ -25,13 +23,12 @@ void WhTool_ModUninit() {
     }
 }
 
-void WhTool_ModSettingsChanged() {
-}
+void WhTool_ModSettingsChanged() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Windhawk tool mod implementation for mods which don't need to inject to other
 // processes or hook other functions. Context:
-// https://github.com/ramensoftware/windhawk-mods/pull/1916
+// https://github.com/ramensoftware/windhawk/wiki/Mods-as-tools:-Running-mods-in-a-dedicated-process
 //
 // The mod will load and run in a dedicated windhawk.exe process.
 //
@@ -45,12 +42,15 @@ void WhTool_ModSettingsChanged() {
 bool g_isToolModProcessLauncher;
 HANDLE g_toolModProcessMutex;
 
-void WINAPI EntryPoint_Hook() {
-    ExitThread(0);
-}
+void WINAPI EntryPoint_Hook() { ExitThread(0); }
 
 BOOL Wh_ModInit() {
-    bool isService = false;
+    DWORD sessionId;
+    if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) && sessionId == 0) {
+        return FALSE;
+    }
+
+    bool isExcluded = false;
     bool isToolModProcess = false;
     bool isCurrentToolModProcess = false;
     int argc;
@@ -60,8 +60,9 @@ BOOL Wh_ModInit() {
     }
 
     for (int i = 1; i < argc; i++) {
-        if (wcscmp(argv[i], L"-service") == 0) {
-            isService = true;
+        if (wcscmp(argv[i], L"-service") == 0 || wcscmp(argv[i], L"-service-start") == 0 ||
+            wcscmp(argv[i], L"-service-stop") == 0) {
+            isExcluded = true;
             break;
         }
     }
@@ -78,7 +79,7 @@ BOOL Wh_ModInit() {
 
     LocalFree(argv);
 
-    if (isService) {
+    if (isExcluded) {
         return FALSE;
     }
 
