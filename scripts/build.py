@@ -42,7 +42,7 @@ def generate_readme() -> str:
             break
         introduction.append(line)
     endl = "\n"
-    return f"""// ==WindhawkModDescription==
+    return f"""// ==WindhawkModReadme==
 /*
 {endl.join(introduction).strip()}
 */
