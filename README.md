@@ -4,6 +4,8 @@
 
 This project is inspired by [ExplorerTabUtility](https://github.com/w4po/ExplorerTabUtility).
 
+The TrashBin tab merging logic is learned from [ALMAS CP](https://github.com/almas-cp/windhawk-mods/blob/explorer-tabs-only/mods/explorer-single-window-tabs.wh.cpp)
+
 ## Key Features
 
 - **Automatic Tab Merging:** Intercepts newly created Windows Explorer (`CabinetWClass`) windows and automatically merges them into an existing Explorer window as a new tab.
