@@ -28,19 +28,52 @@ std::wstring GetComparisonPath(std::wstring path) {
     if (path.back() == L'\\' || path.back() == L'/') path.pop_back();
     if (path.find(L"file:///") == 0) path = path.substr(8);
     std::replace(path.begin(), path.end(), L'/', L'\\');
-    std::transform(path.begin(), path.end(), path.begin(), ::towlower);
+    if (path.compare(0, 2, L"::") != 0) {
+        std::transform(path.begin(), path.end(), path.begin(), ::towlower);
+    }
     return path;
 }
 
 std::wstring GetRawBrowserUrl(IWebBrowser2* pWebBrowser) {
     if (!pWebBrowser) return L"";
+    std::wstring result;
     BSTR bstrUrl = NULL;
-    if (SUCCEEDED(pWebBrowser->get_LocationURL(&bstrUrl)) && bstrUrl) {
-        std::wstring url = bstrUrl;
+    if (SUCCEEDED(pWebBrowser->get_LocationURL(&bstrUrl)) && bstrUrl && wcslen(bstrUrl) > 0) {
+        result = bstrUrl;
         SysFreeString(bstrUrl);
-        return url;
+    } else {
+        if (bstrUrl) SysFreeString(bstrUrl);
+        IServiceProvider* pSP = NULL;
+        if (SUCCEEDED(pWebBrowser->QueryInterface(IID_IServiceProvider, (void**)&pSP))) {
+            IShellBrowser* pSB = NULL;
+            if (SUCCEEDED(pSP->QueryService(SID_STopLevelBrowser, IID_IShellBrowser, (void**)&pSB))) {
+                IShellView* pSV = NULL;
+                if (SUCCEEDED(pSB->QueryActiveShellView(&pSV))) {
+                    IFolderView* pFV = NULL;
+                    if (SUCCEEDED(pSV->QueryInterface(IID_IFolderView, (void**)&pFV))) {
+                        IPersistFolder2* pPF = NULL;
+                        if (SUCCEEDED(pFV->GetFolder(IID_IPersistFolder2, (void**)&pPF))) {
+                            PIDLIST_ABSOLUTE pidl = NULL;
+                            if (SUCCEEDED(pPF->GetCurFolder(&pidl))) {
+                                PWSTR name = NULL;
+                                if (SUCCEEDED(SHGetNameFromIDList(pidl, SIGDN_DESKTOPABSOLUTEPARSING, &name))) {
+                                    result = name;
+                                    CoTaskMemFree(name);
+                                }
+                                CoTaskMemFree(pidl);
+                            }
+                            pPF->Release();
+                        }
+                        pFV->Release();
+                    }
+                    pSV->Release();
+                }
+                pSB->Release();
+            }
+            pSP->Release();
+        }
     }
-    return L"";
+    return result;
 }
 
 HWND GetTabHandle(IWebBrowser2* pWebBrowser) {
@@ -98,15 +131,12 @@ HRESULT NavigateToPath(IWebBrowser2* pWB, const std::wstring& path) {
     return hrFinal;
 }
 
-void BypassWinForegroundRestrictions() {
-    keybd_event(0x86, 0, 0, 0);  // VK_F23
-    keybd_event(0x86, 0, KEYEVENTF_KEYUP, 0);
-}
-
 void RestoreWindowToForeground(HWND hwnd) {
     if (!hwnd || !IsWindow(hwnd)) return;
     if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
-    BypassWinForegroundRestrictions();
+    // virtually press F23 to bypass SetForegroundWindow restrictions
+    keybd_event(0x86, 0, 0, 0);
+    keybd_event(0x86, 0, KEYEVENTF_KEYUP, 0);
     if (!SetForegroundWindow(hwnd)) {
         Sleep(50);
         SetForegroundWindow(hwnd);
@@ -122,7 +152,7 @@ void HideWindowFast(HWND hwnd) {
     LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
     if (!(exStyle & WS_EX_LAYERED)) SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
     SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
-    SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+    SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 class CShellWindowsSink : public IDispatch {
