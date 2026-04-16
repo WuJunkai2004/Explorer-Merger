@@ -144,15 +144,28 @@ void RestoreWindowToForeground(HWND hwnd) {
 }
 
 std::set<HWND> g_allowedHwnds;
+RECT g_lastRect;
 IShellWindows* g_pShellWindows = NULL;
 #define WM_CHECK_WINDOWS (WM_USER + 1)
 
 void HideWindowFast(HWND hwnd) {
     if (!hwnd || !IsWindow(hwnd)) return;
+
+    RECT rc;
+    GetWindowRect(hwnd, &rc);
+    if (rc.left <= -30000) return;  // Already hidden or off-screen, do not record or move
+    g_lastRect = rc;
+
     LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
     if (!(exStyle & WS_EX_LAYERED)) SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
     SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);
     SetWindowPos(hwnd, NULL, -32000, -32000, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void ShowWindowFast(HWND hwnd) {
+    if (!hwnd || !IsWindow(hwnd)) return;
+    SetWindowPos(hwnd, NULL, g_lastRect.left, g_lastRect.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
 }
 
 class CShellWindowsSink : public IDispatch {
@@ -269,6 +282,15 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, 
 
         if (pNewWebBrowser) {
             std::wstring normalizedUrl = GetComparisonPath(GetRawBrowserUrl(pNewWebBrowser));
+
+            if (normalizedUrl.find(L"::{26EE0668-A00A-44D7-9371-BEB064C98683}") != std::wstring::npos ||
+                normalizedUrl.find(L"::{21EC2020-3AEA-1069-A2DD-08002B30309D}") != std::wstring::npos) {
+                ShowWindowFast(hwnd);
+                g_allowedHwnds.insert(hwnd);
+                pNewWebBrowser->Release();
+                pShellWindows->Release();
+                return;
+            }
 
             HWND existingMainHwnd = NULL;
             HWND existingTabHwnd = NULL;
